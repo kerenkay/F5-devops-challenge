@@ -204,4 +204,3 @@ The smaller image also reduces download and storage requirements, which can help
 
 ---
 
-## Anything you would do differently with more time
