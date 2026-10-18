@@ -128,19 +128,52 @@ Verification included `docker compose config --quiet` and a successful test run 
 
 ### Symptom / error output
 
+The CI step `Execute test suite` failed with the following error:
+
+```text
+./scripts/run-tests.sh: Permission denied
+```
+
 ### How I diagnosed it
 
+I reviewed `.github/workflows/ci.yml` and found that it runs `./scripts/run-tests.sh` directly. This requires the script to have executable permission.
+
 ### Root cause
+The script did not have executable permission, so the CI could not run it directly.
+The proxy build failure, incorrect upstream address, and missing startup readiness checks also prevented the test suite from passing.
 
 ### Fix
+
+I added executable permission to `scripts/run-tests.sh` so it can run directly. This permission must be recorded in Git so it is preserved when the CI checks out the repository.
+
+The fixes from Defects 1-3 resolved the image build, backend routing, and startup readiness problems. After pushing these changes, the CI workflow passed. No change to the workflow file was needed.
 
 ---
 
 ## Bonus questions
 
-Optional. Answer only the ones you got to — number them, skip the rest.
+### 1. Reduce the proxy image size
 
->
+I replaced the `ubuntu:24.04` base image with `nginx:stable-alpine-slim`. This image already includes Nginx and uses a smaller Alpine-slim Linux base.
+
+The proxy does not use `htop`, `vim`, or `git` at runtime, so these packages are no longer installed. 
+
+The proxy health check still needs `curl`, so the Dockerfile installs it using `apk add --no-cache curl`. Alpine uses `apk` instead of Ubuntu's `apt-get`.
+
+The custom `nginx.conf` is still copied into `/etc/nginx/nginx.conf`.
+
+#### Image size comparison
+
+| Proxy image | Disk usage | Content size |
+|---|---:|---:|
+| Ubuntu-based | 443 MB | 121 MB |
+| Alpine-Slim-based | 37.1 MB | 10.7 MB |
+
+I used `docker image ls f5-devops-challenge-proxy` to record both sizes. 
+
+#### Verification
+
+I ran `./scripts/run-tests.sh` to confirm that the proxy health check and backend forwarding still work with the new base image.
 
 ---
 
