@@ -16,13 +16,17 @@ services:
   proxy:
     build:
       context: ./proxy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     ports:
-      - "8081:80"
+      - "8081:8080"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "2", "http://127.0.0.1/nginx-health"]
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "2", "http://127.0.0.1:8080/nginx-health"]
       interval: 2s
       timeout: 3s
       retries: 10
@@ -34,4 +38,4 @@ services:
       proxy:
         condition: service_healthy
     environment:
-      - PROXY_URL=http://proxy:80
+      - PROXY_URL=http://proxy:8080

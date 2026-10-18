@@ -139,8 +139,9 @@ The CI step `Execute test suite` failed with the following error:
 I reviewed `.github/workflows/ci.yml` and found that it runs `./scripts/run-tests.sh` directly. This requires the script to have executable permission.
 
 ### Root cause
+
 The script did not have executable permission, so the CI could not run it directly.
-The proxy build failure, incorrect upstream address, and missing startup readiness checks also prevented the test suite from passing.
+The permission error stopped the script before it could build the images or run the tests. Once the script could run, the fixes from Defects 1-3 allowed the build and integration tests to pass.
 
 ### Fix
 
@@ -154,7 +155,7 @@ The fixes from Defects 1-3 resolved the image build, backend routing, and startu
 
 ### 1. Reduce the proxy image size
 
-I replaced the `ubuntu:24.04` base image with `nginx:stable-alpine-slim`. This image already includes Nginx and uses a smaller Alpine-slim Linux base.
+I replaced the `ubuntu:24.04` base image with `nginx:stable-alpine-slim`. This is a minimal Nginx image based on Alpine Linux.
 
 The proxy does not use `htop`, `vim`, or `git` at runtime, so these packages are no longer installed. 
 
@@ -174,6 +175,32 @@ I used `docker image ls f5-devops-challenge-proxy` to record both sizes.
 #### Verification
 
 I ran `./scripts/run-tests.sh` to confirm that the proxy health check and backend forwarding still work with the new base image.
+
+---
+
+### 2. Run the proxy as a non-root user
+
+I added `USER nginx` to the proxy Dockerfile after installing curl and copying the configuration. Package installation runs as root during the build, but Nginx runs as the existing non-root `nginx` user at runtime.
+
+Nginx now writes its PID file to `/tmp/nginx.pid` and its temporary files to directories under `/tmp`. These locations are writable by the nginx user, so it does not need permission to write to system directories.
+
+I changed the proxy's internal listening port from 80 to 8080 to avoid depending on permission to bind a low port. The Compose port mapping is now `8081:8080`, the proxy health check uses port 8080, and the test-runner uses `PROXY_URL=http://proxy:8080`. Local access remains `http://localhost:8081`.
+
+Verification with `docker compose exec -T proxy id` reported `uid=101(nginx) gid=101(nginx) groups=101(nginx)`. The `ps` output showed that both the Nginx master and worker processes run as nginx. The `nginx -t` configuration check passed. Running `./scripts/run-tests.sh` through WSL passed both integration tests, completed cleanup, and exited with code 0.
+
+---
+
+### 3. Additional security and performance improvements
+
+I added `security_opt: ["no-new-privileges:true"]` to the proxy service. This prevents its processes from gaining extra privileges when running another executable, for example through set-user-ID permissions. It complements the non-root user and dropped Linux capabilities.
+
+I added `cap_drop: [ALL]` to the proxy service in `docker-compose.yml`. This removes all Linux capabilities from the container. The proxy only needs to handle HTTP requests on port 8080 and write to its temporary directories, so it does not need these extra operating-system permissions. This adds an explicit restriction alongside running as the non-root nginx user.
+
+After these security changes, `docker compose config --quiet` passed and `./scripts/run-tests.sh` passed both integration tests, completed cleanup, and exited with code 0.
+
+Removing unnecessary packages reduced the image size and the amount of software requiring security updates. Running Nginx as a non-root user limits what it can access or modify if the service is compromised.
+
+The smaller image also reduces download and storage requirements, which can help deployment speed. 
 
 ---
 
